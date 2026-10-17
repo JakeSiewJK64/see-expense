@@ -1,0 +1,24 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - name: Build program
+        run: gcc -o c-expense main.c -lsqlite3
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: c-expense
