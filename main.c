@@ -295,6 +295,19 @@ int print_total(double total) {
   return 0;
 }
 
+void truncate_with_ellipsis(char *dest, size_t dest_size, const char *src,
+                            size_t max_len) {
+  size_t src_len = strlen(src);
+
+  if (src_len <= max_len) {
+    snprintf(dest, dest_size, "%s", src);
+  } else {
+    // Leave room for the 3 dots (...) and null terminator ('\0')
+    size_t copy_len = (max_len > 3) ? (max_len - 3) : 0;
+    snprintf(dest, dest_size, "%.*s...", (int)copy_len, src);
+  }
+}
+
 int list_expenses(sqlite3 *db) {
   int connection;
 
@@ -352,8 +365,13 @@ int list_expenses(sqlite3 *db) {
               sizeof(lastDayBuffer) - 1);
     }
 
-    printf("%-10s %-5s %-20s %-10.2f %-12s %-15s\n", dayToPrint, id, title,
-           atof((char *)amount), date, category);
+    char truncatedTitle[20];
+
+    truncate_with_ellipsis(truncatedTitle, sizeof(truncatedTitle),
+                           (char *)title, 20);
+
+    printf("%-10s %-5s %-20s %-10.2f %-12s %-15s\n", dayToPrint, id,
+           truncatedTitle, atof((char *)amount), date, category);
     totalExpense += atof((char *)amount);
     rowCount++;
   }
