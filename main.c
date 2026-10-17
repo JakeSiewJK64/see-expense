@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <math.h>
 #include <sqlite3.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,26 +46,27 @@ const char *PROGRAM_NAME = "c-expense";
 
 void to_lower_case(char *value) {
   for (int i = 0; value[i] != '\0'; i++) {
-    value[i] = tolower((unsigned char)value[i]);
+    // explicitly cast the int returned by tolower back to char
+    value[i] = (char)tolower((unsigned char)value[i]);
   }
 }
 
-int is_option_token(const char *value) {
-  return strcmp(value, "-t") == 0 || strcmp(value, "--title") == 0 ||
-         strcmp(value, "-a") == 0 || strcmp(value, "--amount") == 0 ||
-         strcmp(value, "-c") == 0 || strcmp(value, "--category") == 0 ||
-         strcmp(value, "-d") == 0 || strcmp(value, "--date") == 0 ||
-         strcmp(value, "-i") == 0 || strcmp(value, "--id") == 0;
+bool is_option_token(const char *value) {
+  return (strcmp(value, "-t") == 0 || strcmp(value, "--title") == 0 ||
+          strcmp(value, "-a") == 0 || strcmp(value, "--amount") == 0 ||
+          strcmp(value, "-c") == 0 || strcmp(value, "--category") == 0 ||
+          strcmp(value, "-d") == 0 || strcmp(value, "--date") == 0 ||
+          strcmp(value, "-i") == 0 || strcmp(value, "--id") == 0) != 0;
 }
 
 char *get_text_from_arguments(int total_arguments, char *variables[],
-                              char *keyword_short, char *keyword_long,
-                              int required) {
+                              const char *keyword_short,
+                              const char *keyword_long, int required) {
   for (int i = 0; i < total_arguments; i++) {
-    int long_match = strcmp(variables[i], keyword_long) == 0;
-    int short_match = strcmp(variables[i], keyword_short) == 0;
+    bool longMatch = strcmp(variables[i], keyword_long) == 0;
+    bool shortMatch = strcmp(variables[i], keyword_short) == 0;
 
-    if (long_match || short_match) {
+    if (longMatch || shortMatch) {
       if (variables[i + 1] == NULL || is_option_token(variables[i + 1])) {
         fprintf(stderr, "%s was not provided.\n", keyword_long);
         return NULL;
@@ -82,7 +84,39 @@ char *get_text_from_arguments(int total_arguments, char *variables[],
   return NULL;
 }
 
-int handle_insert(int total_arguments, char *variables[], sqlite3 *db) {
+int execute_insert_expense(const char *category, double amount,
+                           const char *title, sqlite3 *database,
+                           char dateString[50]) {
+  // prepare sqlite statement and execution
+  sqlite3_stmt *statement;
+
+  if (sqlite3_prepare_v2(database, INSERT_STATEMENT, -1, &statement, NULL) !=
+      SQLITE_OK) {
+    fprintf(stderr, "Failed to prepare statement: %s\n",
+            sqlite3_errmsg(database));
+
+    return 1;
+  }
+
+  sqlite3_bind_text(statement, 1, title, -1, SQLITE_STATIC);
+  sqlite3_bind_double(statement, 2, amount);
+  sqlite3_bind_text(statement, 3, dateString, -1, SQLITE_STATIC);
+  sqlite3_bind_text(statement, 4, category, -1, SQLITE_STATIC);
+
+  if (sqlite3_step(statement) != SQLITE_DONE) {
+    fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(database));
+    return 1;
+  }
+
+  sqlite3_finalize(statement);
+
+  printf("Successfully inserted expense %s at %.2f on %s type %s.\n", title,
+         amount, dateString, (category != NULL) ? category : "n/a");
+
+  return 0;
+}
+
+int handle_insert(int total_arguments, char *variables[], sqlite3 *database) {
   char *titleInput =
       get_text_from_arguments(total_arguments, variables, "-t", "--title", 1);
 
@@ -194,30 +228,12 @@ int handle_insert(int total_arguments, char *variables[], sqlite3 *db) {
     snprintf(category, sizeof(category), "%s", categoryInput);
   }
 
-  // prepare sqlite statement and execution
-  sqlite3_stmt *statement;
+  int execute_result = execute_insert_expense(category, amount, titleInput,
+                                              database, dateString);
 
-  if (sqlite3_prepare_v2(db, INSERT_STATEMENT, -1, &statement, NULL) !=
-      SQLITE_OK) {
-    fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
-
+  if (execute_result == 1) {
     return 1;
   }
-
-  sqlite3_bind_text(statement, 1, titleInput, -1, SQLITE_STATIC);
-  sqlite3_bind_double(statement, 2, amount);
-  sqlite3_bind_text(statement, 3, dateString, -1, SQLITE_STATIC);
-  sqlite3_bind_text(statement, 4, category, -1, SQLITE_STATIC);
-
-  if (sqlite3_step(statement) != SQLITE_DONE) {
-    fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(db));
-    return 1;
-  }
-
-  sqlite3_finalize(statement);
-
-  printf("Successfully inserted expense %s at %s on %s type %s.\n", titleInput,
-         amountInput, dateString, categoryInput ? categoryInput : "n/a");
 
   return 0;
 }
@@ -247,7 +263,7 @@ int ensure_directory_exists(const char *homeDir) {
   return 0;
 }
 
-int initialize_db(sqlite3 **db, char **zErrMsg) {
+int initialize_db(sqlite3 **database, char **zErrMsg) {
   const char *homeDir = getenv("HOME");
 
   if (homeDir == NULL) {
@@ -263,22 +279,22 @@ int initialize_db(sqlite3 **db, char **zErrMsg) {
 
   snprintf(dbPath, sizeof(dbPath), "%s/.config/c-expense/db.sqlite3", homeDir);
 
-  int connection = sqlite3_open(dbPath, db);
+  int connection = sqlite3_open(dbPath, database);
 
   if (connection != SQLITE_OK) {
-    fprintf(stderr, "Failed to open database: %s\n", sqlite3_errmsg(*db));
+    fprintf(stderr, "Failed to open database: %s\n", sqlite3_errmsg(*database));
 
     return 1;
   }
 
   // attempt to create expense table if not exist.
-  connection = sqlite3_exec(*db, CREATE_STATEMENT, NULL, NULL, zErrMsg);
+  connection = sqlite3_exec(*database, CREATE_STATEMENT, NULL, NULL, zErrMsg);
 
   if (connection != SQLITE_OK) {
     fprintf(stderr, "Failed to create expense table: %s\n",
-            sqlite3_errmsg(*db));
+            sqlite3_errmsg(*database));
     sqlite3_free(*zErrMsg);
-    sqlite3_close(*db);
+    sqlite3_close(*database);
     return 1;
   }
 
@@ -308,17 +324,18 @@ void truncate_with_ellipsis(char *dest, size_t dest_size, const char *src,
   }
 }
 
-int list_expenses(sqlite3 *db) {
+int list_expenses(sqlite3 *database) {
   int connection;
 
-  // retrieve data from db
+  // retrieve data from database
   sqlite3_stmt *statement;
 
-  connection =
-      sqlite3_prepare_v2(db, QUERY_EXPENSES_STATEMENT, -1, &statement, NULL);
+  connection = sqlite3_prepare_v2(database, QUERY_EXPENSES_STATEMENT, -1,
+                                  &statement, NULL);
 
   if (connection != SQLITE_OK) {
-    fprintf(stderr, "Failed to prepare statement: %s.\n", sqlite3_errmsg(db));
+    fprintf(stderr, "Failed to prepare statement: %s.\n",
+            sqlite3_errmsg(database));
     return 1;
   }
 
@@ -329,29 +346,30 @@ int list_expenses(sqlite3 *db) {
          "---------------");
 
   int rowCount = 0;
-  float totalExpense = 0;
+  double totalExpense = 0;
   char lastDayBuffer[32] = ""; // stores name of day
 
   while ((connection = sqlite3_step(statement)) == SQLITE_ROW) {
     const unsigned char *title = sqlite3_column_text(statement, 0);
-    const float amount = sqlite3_column_double(statement, 1);
+    const double amount = sqlite3_column_double(statement, 1);
     const unsigned char *date = sqlite3_column_text(statement, 2);
     const unsigned char *category = sqlite3_column_text(statement, 3);
     const unsigned char *day_of_week = sqlite3_column_text(statement, 4);
-    const int id = sqlite3_column_int(statement, 5);
+    const int expenseId = sqlite3_column_int(statement, 5);
 
-    title = title ? title : (const unsigned char *)"";
-    date = date ? date : (const unsigned char *)"";
-    category = category ? category : (const unsigned char *)"";
-    day_of_week = day_of_week ? day_of_week : (const unsigned char *)"";
+    title = (title != NULL) ? title : (const unsigned char *)"";
+    date = (date != NULL) ? date : (const unsigned char *)"";
+    category = (category != NULL) ? category : (const unsigned char *)"";
+    day_of_week =
+        (day_of_week != NULL) ? day_of_week : (const unsigned char *)"";
 
     const char *dayToPrint = "";
 
     // print by day of week
-    int differentDay = strcmp((const char *)day_of_week, lastDayBuffer) != 0;
+    int differentDay = strcmp((const char *)day_of_week, lastDayBuffer);
 
     // if different day detected, set last day to current day
-    if (rowCount == 0 || differentDay) {
+    if (rowCount == 0 || differentDay != 0) {
       if (lastDayBuffer[0] != '\0') {
         print_total(totalExpense);
         totalExpense = 0;
@@ -368,7 +386,7 @@ int list_expenses(sqlite3 *db) {
     truncate_with_ellipsis(truncatedTitle, sizeof(truncatedTitle),
                            (char *)title, 20);
 
-    printf("%-10s %-5d %-20s %-10.2f %-12s %-15s\n", dayToPrint, id,
+    printf("%-10s %-5d %-20s %-10.2f %-12s %-15s\n", dayToPrint, expenseId,
            truncatedTitle, amount, date, category);
     totalExpense += amount;
     rowCount++;
@@ -385,7 +403,7 @@ int list_expenses(sqlite3 *db) {
   }
 
   if (connection != SQLITE_DONE) {
-    fprintf(stderr, "Execution error: %s.\n", sqlite3_errmsg(db));
+    fprintf(stderr, "Execution error: %s.\n", sqlite3_errmsg(database));
   }
 
   sqlite3_finalize(statement);
@@ -393,7 +411,7 @@ int list_expenses(sqlite3 *db) {
   return 0;
 }
 
-int delete_expense(sqlite3 *db, int total_arguments, char *variables[]) {
+int delete_expense(sqlite3 *database, int total_arguments, char *variables[]) {
   int connection;
   char *idInput =
       get_text_from_arguments(total_arguments, variables, "-i", "--id", 1);
@@ -413,24 +431,25 @@ int delete_expense(sqlite3 *db, int total_arguments, char *variables[]) {
 
   sqlite3_stmt *statement;
 
-  connection = sqlite3_prepare_v2(db, DELETE_STATEMENT, -1, &statement, NULL);
+  connection =
+      sqlite3_prepare_v2(database, DELETE_STATEMENT, -1, &statement, NULL);
 
   if (connection != SQLITE_OK) {
-    fprintf(stderr, "%s\n", sqlite3_errmsg(db));
+    fprintf(stderr, "%s\n", sqlite3_errmsg(database));
     return 1;
   }
 
   sqlite3_bind_int64(statement, 1, sanitizedIdInput);
 
   if (sqlite3_step(statement) != SQLITE_DONE) {
-    fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(db));
+    fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(database));
     sqlite3_finalize(statement);
     return 1;
   }
 
   sqlite3_finalize(statement);
 
-  if (sqlite3_changes(db) == 0) {
+  if (sqlite3_changes(database) == 0) {
     fprintf(stderr, "Error: Record with ID %ld does not exist.\n",
             sanitizedIdInput);
 
@@ -481,10 +500,10 @@ int main(int total_arguments, char *variables[]) {
     return print_help();
   }
 
-  sqlite3 *db = NULL;
+  sqlite3 *database = NULL;
   char *zErrMsg = NULL;
 
-  if (initialize_db(&db, &zErrMsg) != 0) {
+  if (initialize_db(&database, &zErrMsg) != 0) {
     return 1;
   }
 
@@ -495,17 +514,17 @@ int main(int total_arguments, char *variables[]) {
   int status_code = 0;
 
   if (strcmp(command, "add") == 0) {
-    status_code = handle_insert(total_arguments, variables, db);
+    status_code = handle_insert(total_arguments, variables, database);
   } else if (strcmp(command, "list") == 0) {
-    status_code = list_expenses(db);
+    status_code = list_expenses(database);
   } else if (strcmp(command, "delete") == 0) {
-    status_code = delete_expense(db, total_arguments, variables);
+    status_code = delete_expense(database, total_arguments, variables);
   } else {
     fprintf(stderr, "Invalid command received: %s.\n", command);
     status_code = 1;
   }
 
   sqlite3_free(zErrMsg);
-  sqlite3_close(db);
+  sqlite3_close(database);
   return status_code;
 }

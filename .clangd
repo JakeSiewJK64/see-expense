@@ -1,0 +1,8 @@
+CompileFlags:
+  Add: [-std=c11, -Wall]
+  Compiler: gcc
+
+Diagnostics:
+  ClangTidy:
+    Add: [bugprone-*, performance-*, readability-*]
+    Remove: [readability-magic-numbers]
