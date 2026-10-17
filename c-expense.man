@@ -1,0 +1,86 @@
+.TH C-EXPENSE 1 "2026-05-13" "c-expense 1.0" "User Commands"
+.SH NAME
+c-expense \- simple command-line expense tracker
+.SH SYNOPSIS
+.B c-expense
+.RI [COMMAND]
+.RI [OPTIONS]
+.br
+.B c-expense add
+.RB [ \-t " | " \-\-title " " \fITITLE\fR]
+.RB [ \-a " | " \-\-amount " " \fIAMOUNT\fR]
+.RB [ \-c " | " \-\-category " " \fICATEGORY\fR]
+.RB [ \-d " | " \-\-date " " \fIDATE\fR]
+.br
+.B c-expense delete
+.RB \-i " | " \-\-id " " \fIID\fR
+.br
+.B c-expense list
+.SH DESCRIPTION
+.B c-expense
+is a minimal expense tracker backed by SQLite. Expenses are stored locally and can be added, listed, and deleted from the command line.
+.SH COMMANDS
+.TP
+.B add
+Add a new expense.
+.TP
+.B delete
+Delete an expense by ID.
+.TP
+.B list
+List all expenses.
+.SH OPTIONS
+For the
+.B add
+command:
+.TP
+.BR \-t ", " \-\-title " " \fITITLE\fR
+Title or description of the expense. Required.
+.TP
+.BR \-a ", " \-\-amount " " \fIAMOUNT\fR
+Amount of the expense, e.g. \fI10\fR or \fI10.50\fR. Required.
+.TP
+.BR \-c ", " \-\-category " " \fICATEGORY\fR
+Category of the expense, e.g. \fIfood\fR, \fItransport\fR, \fIrent\fR. Optional.
+.TP
+.BR \-d ", " \-\-date " " \fIDATE\fR
+Date of the expense. Format \fIDD/MM\fR or \fIDD/MM/YYYY\fR, e.g. \fI10/09\fR. If year is omitted, current year is assumed. Optional.
+
+For the
+.B delete
+command:
+.TP
+.BR \-i ", " \-\-id " " \fIID\fR
+ID of the expense to delete. The ID is shown in the output of \fBc-expense list\fR. Required.
+
+The
+.B list
+command takes no options.
+.SH EXAMPLES
+.TP
+Delete expense with ID 10:
+.B c-expense delete -i 10
+.TP
+Add lunch expense:
+.B c-expense add --title lunch --amount 10 --category food --date 10/09
+.TP
+Same using short flags:
+.B c-expense add -t lunch -a 10 -c food -d 10/09
+.TP
+List all expenses grouped by day of week:
+.B c-expense list
+.SH FILES
+.TP
+.I./expenses.db
+Default SQLite database file (or path defined by DB_FILE at compile time).
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Failure (database error, missing arguments, or invalid input).
+.SH AUTHOR
+Written by JakeSiewJK64.
+.SH SEE ALSO
+.BR sqlite3 (1)
