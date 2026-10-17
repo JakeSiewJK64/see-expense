@@ -334,18 +334,16 @@ int list_expenses(sqlite3 *db) {
 
   while ((connection = sqlite3_step(statement)) == SQLITE_ROW) {
     const unsigned char *title = sqlite3_column_text(statement, 0);
-    const unsigned char *amount = sqlite3_column_text(statement, 1);
+    const float amount = sqlite3_column_double(statement, 1);
     const unsigned char *date = sqlite3_column_text(statement, 2);
     const unsigned char *category = sqlite3_column_text(statement, 3);
     const unsigned char *day_of_week = sqlite3_column_text(statement, 4);
-    const unsigned char *id = sqlite3_column_text(statement, 5);
+    const int id = sqlite3_column_int(statement, 5);
 
     title = title ? title : (const unsigned char *)"";
-    amount = amount ? amount : (const unsigned char *)"";
     date = date ? date : (const unsigned char *)"";
     category = category ? category : (const unsigned char *)"";
     day_of_week = day_of_week ? day_of_week : (const unsigned char *)"";
-    id = id ? id : (const unsigned char *)"";
 
     const char *dayToPrint = "";
 
@@ -370,9 +368,9 @@ int list_expenses(sqlite3 *db) {
     truncate_with_ellipsis(truncatedTitle, sizeof(truncatedTitle),
                            (char *)title, 20);
 
-    printf("%-10s %-5s %-20s %-10.2f %-12s %-15s\n", dayToPrint, id,
-           truncatedTitle, atof((char *)amount), date, category);
-    totalExpense += atof((char *)amount);
+    printf("%-10s %-5d %-20s %-10.2f %-12s %-15s\n", dayToPrint, id,
+           truncatedTitle, amount, date, category);
+    totalExpense += amount;
     rowCount++;
   }
 
