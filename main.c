@@ -12,7 +12,7 @@
 
 const char *DELETE_STATEMENT = "DELETE FROM expenses WHERE id = ?;";
 
-const char *QUERY_EXPENSES_STATEMENT =
+const char *QUERY_CURRENT_MONTH_EXPENSES_STATEMENT =
     "SELECT title, amount, expense_date, category, "
     "CASE CAST(strftime('%w', expense_date) AS INTEGER)"
     "WHEN 0 THEN 'Sunday'"
@@ -23,8 +23,44 @@ const char *QUERY_EXPENSES_STATEMENT =
     "WHEN 5 THEN 'Friday'"
     "ELSE 'Saturday'"
     "END AS day_of_week,"
-    "id"
-    " FROM expenses ORDER BY expense_date;";
+    "id "
+    "FROM expenses "
+    "WHERE strftime('%Y-%m', expense_date) = (SELECT strftime('%Y-%m', 'now', "
+    "'localtime')) "
+    "ORDER BY expense_date;";
+
+const char *QUERY_CURRENT_YEAR_EXPENSES_STATEMENT =
+    "SELECT title, amount, expense_date, category, "
+    "CASE CAST(strftime('%w', expense_date) AS INTEGER)"
+    "WHEN 0 THEN 'Sunday'"
+    "WHEN 1 THEN 'Monday'"
+    "WHEN 2 THEN 'Tuesday'"
+    "WHEN 3 THEN 'Wednesday'"
+    "WHEN 4 THEN 'Thursday'"
+    "WHEN 5 THEN 'Friday'"
+    "ELSE 'Saturday'"
+    "END AS day_of_week,"
+    "id "
+    "FROM expenses "
+    "WHERE strftime('%Y', expense_date) = (SELECT strftime('%Y', 'now', "
+    "'localtime')) "
+    "ORDER BY expense_date;";
+
+const char *QUERY_CURRENT_DAY_EXPENSES_STATEMENT =
+    "SELECT title, amount, expense_date, category, "
+    "CASE CAST(strftime('%w', expense_date) AS INTEGER)"
+    "WHEN 0 THEN 'Sunday'"
+    "WHEN 1 THEN 'Monday'"
+    "WHEN 2 THEN 'Tuesday'"
+    "WHEN 3 THEN 'Wednesday'"
+    "WHEN 4 THEN 'Thursday'"
+    "WHEN 5 THEN 'Friday'"
+    "ELSE 'Saturday'"
+    "END AS day_of_week,"
+    "id "
+    "FROM expenses "
+    "WHERE expense_date = date('now', 'localtime')"
+    "ORDER BY expense_date;";
 
 const char *CREATE_STATEMENT =
     "CREATE TABLE IF NOT EXISTS expenses ("
@@ -56,6 +92,8 @@ bool is_option_token(const char *value) {
           strcmp(value, "-a") == 0 || strcmp(value, "--amount") == 0 ||
           strcmp(value, "-c") == 0 || strcmp(value, "--category") == 0 ||
           strcmp(value, "-d") == 0 || strcmp(value, "--date") == 0 ||
+          strcmp(value, "-m") == 0 || strcmp(value, "--mode") == 0 ||
+          strcmp(value, "-h") == 0 || strcmp(value, "--help") == 0 ||
           strcmp(value, "-i") == 0 || strcmp(value, "--id") == 0) != 0;
 }
 
@@ -69,7 +107,7 @@ char *get_text_from_arguments(int total_arguments, char *variables[],
     if (longMatch || shortMatch) {
       if (variables[i + 1] == NULL || is_option_token(variables[i + 1])) {
         fprintf(stderr, "%s was not provided.\n", keyword_long);
-        return NULL;
+        exit(EXIT_FAILURE);
       }
 
       return variables[i + 1];
@@ -324,14 +362,33 @@ void truncate_with_ellipsis(char *dest, size_t dest_size, const char *src,
   }
 }
 
-int list_expenses(sqlite3 *database) {
+int list_expenses(int total_arguments, char *variables[], sqlite3 *database) {
   int connection;
 
   // retrieve data from database
   sqlite3_stmt *statement;
 
-  connection = sqlite3_prepare_v2(database, QUERY_EXPENSES_STATEMENT, -1,
-                                  &statement, NULL);
+  // check if list all.
+  // list current day by default.
+  const char *mode =
+      get_text_from_arguments(total_arguments, variables, "-m", "--mode", 0);
+
+  const char *query = QUERY_CURRENT_DAY_EXPENSES_STATEMENT;
+
+  if (mode != NULL) {
+    if (strcmp(mode, "month") == 0) {
+      query = QUERY_CURRENT_MONTH_EXPENSES_STATEMENT;
+    } else if (strcmp(mode, "day") == 0) {
+      query = QUERY_CURRENT_DAY_EXPENSES_STATEMENT;
+    } else if (strcmp(mode, "year") == 0) {
+      query = QUERY_CURRENT_YEAR_EXPENSES_STATEMENT;
+    } else {
+      fprintf(stderr, "Error: Invalid mode %s.\n", mode);
+      return 1;
+    }
+  }
+
+  connection = sqlite3_prepare_v2(database, query, -1, &statement, NULL);
 
   if (connection != SQLITE_OK) {
     fprintf(stderr, "Failed to prepare statement: %s.\n",
@@ -467,17 +524,20 @@ int print_help() {
          "Commands:\n"
          " add Add a new expense\n"
          " delete Delete an expense by ID\n"
-         " list List all expenses\n"
+         " list List expenses. Returns current day by default.\n"
          " help Show this help message\n"
          "\n"
          "Add options:\n"
          " -t, --title TITLE Expense title (required)\n"
          " -a, --amount AMOUNT Amount, e.g. 10 or 10.50 (required)\n"
          " -c, --category CAT Category, e.g. food, transport (optional)\n"
-         " -d, --date DATE Date DD/MM or DD/MM/YYYY, e.g. 10/09 (optional)\n"
+         " -d, --date DATE Date MM/DD or MM/DD/YYYY, e.g. 10/09 (optional)\n"
          "\n"
          "Delete options:\n"
          " -i, --id ID ID of expense to delete (required)\n"
+         "\n"
+         "List options:\n"
+         " -m, --mode day, month, year (optional)\n"
          "\n"
          "Examples:\n"
          " %s delete -i 10\n"
@@ -488,9 +548,14 @@ int print_help() {
          " adds a lunch expense.\n"
          "\n"
          " %s list\n"
-         " lists all expenses.\n"
+         " lists all current day expenses.\n"
+         " %s list --mode month\n"
+         " lists all current month expenses.\n"
+         " %s list --mode year\n"
+         " lists all current year expenses.\n"
          "\n",
-         PROGRAM_NAME, PROGRAM_NAME, PROGRAM_NAME, PROGRAM_NAME, PROGRAM_NAME);
+         PROGRAM_NAME, PROGRAM_NAME, PROGRAM_NAME, PROGRAM_NAME, PROGRAM_NAME,
+         PROGRAM_NAME, PROGRAM_NAME);
 
   return 0;
 }
@@ -515,8 +580,10 @@ int main(int total_arguments, char *variables[]) {
 
   if (strcmp(command, "add") == 0) {
     status_code = handle_insert(total_arguments, variables, database);
+  } else if (strcmp(command, "help") == 0) {
+    print_help();
   } else if (strcmp(command, "list") == 0) {
-    status_code = list_expenses(database);
+    status_code = list_expenses(total_arguments, variables, database);
   } else if (strcmp(command, "delete") == 0) {
     status_code = delete_expense(database, total_arguments, variables);
   } else {
